@@ -116,6 +116,7 @@ class LogStash::Filters::Http < LogStash::Filters::Base
           @logger.debug? && @logger.debug('success received',
                                           :code => code, :headers => response_headers, :body => response_body)
 
+          @cache[url_for_event] = response_body
           process_response(response_body, response_headers, event)
           filter_matched(event)
         end
