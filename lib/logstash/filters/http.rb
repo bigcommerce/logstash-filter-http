@@ -77,6 +77,8 @@ class LogStash::Filters::Http < LogStash::Filters::Base
       result = @cache[url_for_event]
       if result
         @logger.warn('cache hit for', :url => url_for_event)
+        process_response(result, {}, event)
+        filter_matched(event)
       else
         @logger.warn('cache miss for', :url => url_for_event)
         headers_sprintfed = sprintf_object(event, @headers)
