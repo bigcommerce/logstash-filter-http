@@ -6,6 +6,7 @@ require 'logstash/plugin_mixins/http_client'
 require 'logstash/plugin_mixins/ecs_compatibility_support'
 require 'logstash/plugin_mixins/ecs_compatibility_support/target_check'
 require 'logstash/plugin_mixins/validator_support/field_reference_validation_adapter'
+require "lru_redux"
 
 # Logstash HTTP Filter
 # This filter calls a defined URL and saves the answer into a specified field.
@@ -39,6 +40,15 @@ class LogStash::Filters::Http < LogStash::Filters::Base
   config :tag_on_request_failure, :validate => :array, :default => ['_httprequestfailure']
   config :tag_on_json_failure, :validate => :array, :default => ['_jsonparsefailure']
 
+  # Enable or disable caching, boolean true or false, defaults to true
+  config :use_cache, :validate => :boolean, :default => true
+
+  # cache TTL in seconds, defaults to 1 day
+  config :cache_ttl, :validate => :number, :default => 86400
+
+  # cache size in max number of entries
+  config :cache_size, :validate => :number, :default => 2500
+
   def initialize(*params)
     super
 
@@ -54,10 +64,26 @@ class LogStash::Filters::Http < LogStash::Filters::Base
   def register
     # nothing to see here
     @verb = verb.downcase
+
+    if @cache_size > 0
+      @cache = LruRedux::TTL::ThreadSafeCache.new(@cache_size, @cache_ttl)
+    end
   end
 
   def filter(event)
     url_for_event = event.sprintf(@url)
+
+    if @cache
+      result = @cache[url_for_event]
+      if result
+        @logger.warn('cache hit for', :url => url_for_event)
+      else
+        @logger.warn('cache miss for', :url => url_for_event)
+      end
+    else
+      @logger.warn('cache disabled')
+    end
+
     headers_sprintfed = sprintf_object(event, @headers)
     if !headers_sprintfed.key?('content-type') && !headers_sprintfed.key?('Content-Type')
       headers_sprintfed['content-type'] = @body_format == "json" ? "application/json" : "text/plain"
@@ -94,6 +120,7 @@ class LogStash::Filters::Http < LogStash::Filters::Base
     else
       @logger.debug? && @logger.debug('success received',
                                       :code => code, :headers => response_headers, :body => response_body)
+
       process_response(response_body, response_headers, event)
       filter_matched(event)
     end
