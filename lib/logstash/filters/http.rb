@@ -79,50 +79,89 @@ class LogStash::Filters::Http < LogStash::Filters::Base
         @logger.warn('cache hit for', :url => url_for_event)
       else
         @logger.warn('cache miss for', :url => url_for_event)
+        headers_sprintfed = sprintf_object(event, @headers)
+        if !headers_sprintfed.key?('content-type') && !headers_sprintfed.key?('Content-Type')
+          headers_sprintfed['content-type'] = @body_format == "json" ? "application/json" : "text/plain"
+        end
+        query_sprintfed = sprintf_object(event, @query)
+        body_sprintfed = sprintf_object(event, @body)
+        # we don't need to serialize strings and numbers
+        if @body_format == "json" && body_sprintfed.kind_of?(Enumerable)
+          body_sprintfed = LogStash::Json.dump(body_sprintfed)
+        end
+
+        options = { :headers => headers_sprintfed, :query => query_sprintfed, :body => body_sprintfed }
+
+        @logger.debug? && @logger.debug('processing request', :url => url_for_event, :headers => headers_sprintfed, :query => query_sprintfed)
+        client_error = nil
+
+        begin
+          code, response_headers, response_body = request_http(@verb, url_for_event, options)
+        rescue => e
+          client_error = e
+        end
+
+        if client_error
+          @logger.error('error during HTTP request',
+                        :url => url_for_event, :body => body_sprintfed,
+                        :client_error => client_error.message)
+          @tag_on_request_failure.each { |tag| event.tag(tag) }
+        elsif !code.between?(200, 299)
+          @logger.error('error during HTTP request',
+                        :url => url_for_event, :code => code,
+                        :headers => response_headers,
+                        :response => response_body)
+          @tag_on_request_failure.each { |tag| event.tag(tag) }
+        else
+          @logger.debug? && @logger.debug('success received',
+                                          :code => code, :headers => response_headers, :body => response_body)
+
+          process_response(response_body, response_headers, event)
+          filter_matched(event)
+        end
       end
     else
       @logger.warn('cache disabled')
-    end
+      headers_sprintfed = sprintf_object(event, @headers)
+      if !headers_sprintfed.key?('content-type') && !headers_sprintfed.key?('Content-Type')
+        headers_sprintfed['content-type'] = @body_format == "json" ? "application/json" : "text/plain"
+      end
+      query_sprintfed = sprintf_object(event, @query)
+      body_sprintfed = sprintf_object(event, @body)
+      # we don't need to serialize strings and numbers
+      if @body_format == "json" && body_sprintfed.kind_of?(Enumerable)
+        body_sprintfed = LogStash::Json.dump(body_sprintfed)
+      end
 
-    headers_sprintfed = sprintf_object(event, @headers)
-    if !headers_sprintfed.key?('content-type') && !headers_sprintfed.key?('Content-Type')
-      headers_sprintfed['content-type'] = @body_format == "json" ? "application/json" : "text/plain"
-    end
-    query_sprintfed = sprintf_object(event, @query)
-    body_sprintfed = sprintf_object(event, @body)
-    # we don't need to serialize strings and numbers
-    if @body_format == "json" && body_sprintfed.kind_of?(Enumerable)
-      body_sprintfed = LogStash::Json.dump(body_sprintfed)
-    end
+      options = { :headers => headers_sprintfed, :query => query_sprintfed, :body => body_sprintfed }
 
-    options = { :headers => headers_sprintfed, :query => query_sprintfed, :body => body_sprintfed }
+      @logger.debug? && @logger.debug('processing request', :url => url_for_event, :headers => headers_sprintfed, :query => query_sprintfed)
+      client_error = nil
 
-    @logger.debug? && @logger.debug('processing request', :url => url_for_event, :headers => headers_sprintfed, :query => query_sprintfed)
-    client_error = nil
+      begin
+        code, response_headers, response_body = request_http(@verb, url_for_event, options)
+      rescue => e
+        client_error = e
+      end
 
-    begin
-      code, response_headers, response_body = request_http(@verb, url_for_event, options)
-    rescue => e
-      client_error = e
-    end
+      if client_error
+        @logger.error('error during HTTP request',
+                      :url => url_for_event, :body => body_sprintfed,
+                      :client_error => client_error.message)
+        @tag_on_request_failure.each { |tag| event.tag(tag) }
+      elsif !code.between?(200, 299)
+        @logger.error('error during HTTP request',
+                      :url => url_for_event, :code => code,
+                      :headers => response_headers,
+                      :response => response_body)
+        @tag_on_request_failure.each { |tag| event.tag(tag) }
+      else
+        @logger.debug? && @logger.debug('success received',
+                                        :code => code, :headers => response_headers, :body => response_body)
 
-    if client_error
-      @logger.error('error during HTTP request',
-                    :url => url_for_event, :body => body_sprintfed,
-                    :client_error => client_error.message)
-      @tag_on_request_failure.each { |tag| event.tag(tag) }
-    elsif !code.between?(200, 299)
-      @logger.error('error during HTTP request',
-                    :url => url_for_event, :code => code,
-                    :headers => response_headers,
-                    :response => response_body)
-      @tag_on_request_failure.each { |tag| event.tag(tag) }
-    else
-      @logger.debug? && @logger.debug('success received',
-                                      :code => code, :headers => response_headers, :body => response_body)
-
-      process_response(response_body, response_headers, event)
-      filter_matched(event)
+        process_response(response_body, response_headers, event)
+        filter_matched(event)
+      end
     end
   end # def filter
 
