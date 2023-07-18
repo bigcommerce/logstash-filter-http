@@ -47,7 +47,7 @@ class LogStash::Filters::Http < LogStash::Filters::Base
   config :cache_ttl, :validate => :number, :default => 86400
 
   # cache size in max number of entries
-  config :cache_size, :validate => :number, :default => 2500
+  config :cache_size, :validate => :number, :default => 50000
 
   def initialize(*params)
     super
@@ -76,11 +76,11 @@ class LogStash::Filters::Http < LogStash::Filters::Base
     if @cache
       result = @cache[url_for_event]
       if result
-        @logger.warn('cache hit for', :url => url_for_event)
+        @logger.debug? && @logger.debug('cache hit for', :url => url_for_event)
         process_response(result, {}, event)
         filter_matched(event)
       else
-        @logger.warn('cache miss for', :url => url_for_event)
+        @logger.debug? && @logger.debug('cache miss for', :url => url_for_event)
         headers_sprintfed = sprintf_object(event, @headers)
         if !headers_sprintfed.key?('content-type') && !headers_sprintfed.key?('Content-Type')
           headers_sprintfed['content-type'] = @body_format == "json" ? "application/json" : "text/plain"
@@ -124,7 +124,7 @@ class LogStash::Filters::Http < LogStash::Filters::Base
         end
       end
     else
-      @logger.warn('cache disabled')
+      @logger.debug? && @logger.debug('cache disabled')
       headers_sprintfed = sprintf_object(event, @headers)
       if !headers_sprintfed.key?('content-type') && !headers_sprintfed.key?('Content-Type')
         headers_sprintfed['content-type'] = @body_format == "json" ? "application/json" : "text/plain"
